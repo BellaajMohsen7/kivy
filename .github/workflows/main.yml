@@ -7,19 +7,34 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# Set this to the directory that contains buildozer.spec
+# Use "." if buildozer.spec is at the repo root
+env:
+  APP_DIR: "."
+
 jobs:
   build-android-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Locate buildozer.spec (debug)
+        run: |
+          echo "Working directory: $PWD"
+          find . -maxdepth 3 -name buildozer.spec -print || true
+
       - name: Ensure buildozer.spec exists
         run: |
           if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec not found. Create it locally (buildozer init) and commit it."
+            echo "ERROR: buildozer.spec not found in $PWD. Set APP_DIR to the folder containing buildozer.spec or commit it."
             exit 1
           fi
 
@@ -30,7 +45,7 @@ jobs:
             .buildozer
             .gradle
             .android
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
+          key: ${{ runner.os }}-buildozer-${{ hashFiles(format('{0}/buildozer.spec', env.APP_DIR), 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-
 
@@ -51,14 +66,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: bin/*.apk
+          path: ${{ env.APP_DIR }}/bin/*.apk
           if-no-files-found: error
 
   build-android-aab:
     name: Build Signed AAB (Release)
     runs-on: ubuntu-latest
 
-    # Expose secrets to steps as env
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+
+    # Expose signing secrets to steps
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -75,11 +95,17 @@ jobs:
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/checkout@v4
 
+      - name: Locate buildozer.spec (debug)
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "Working directory: $PWD"
+          find . -maxdepth 3 -name buildozer.spec -print || true
+
       - name: Ensure buildozer.spec exists
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec not found. Create it locally (buildozer init) and commit it."
+            echo "ERROR: buildozer.spec not found in $PWD. Set APP_DIR to the folder containing buildozer.spec or commit it."
             exit 1
           fi
 
@@ -91,7 +117,7 @@ jobs:
             .buildozer
             .gradle
             .android
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
+          key: ${{ runner.os }}-buildozer-${{ hashFiles(format('{0}/buildozer.spec', env.APP_DIR), 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-
 
@@ -134,5 +160,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-aab
-          path: bin/*.aab
+          path: ${{ env.APP_DIR }}/bin/*.aab
           if-no-files-found: error
