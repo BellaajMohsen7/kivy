@@ -1,0 +1,133 @@
+name: Android Builds (Kivy → APK/AAB)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure buildozer.spec exists
+        run: |
+          if [ ! -f buildozer.spec ]; then
+            echo "ERROR: buildozer.spec not found. Create it locally (buildozer init) and commit it."
+            exit 1
+          fi
+
+      - name: Restore caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .buildozer
+            .gradle
+            .android
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+
+      - name: Build debug APK with Buildozer (Docker)
+        run: |
+          mkdir -p .buildozer .gradle .android
+          docker pull kivy/buildozer:latest
+          docker run --rm \
+            -e BUILDOZER_WARN_ON_ROOT=0 \
+            -v "$PWD":/home/user/app \
+            -v "$PWD/.buildozer":/home/user/.buildozer \
+            -v "$PWD/.gradle":/home/user/.gradle \
+            -v "$PWD/.android":/home/user/.android \
+            kivy/buildozer:latest \
+            buildozer -v android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: bin/*.apk
+          if-no-files-found: error
+
+  build-android-aab:
+    # This job is optional and runs only if a keystore secret is present.
+    # Add the following repository secrets to enable:
+    # - ANDROID_KEYSTORE_BASE64 (your .jks file base64-encoded)
+    # - ANDROID_KEYSTORE_PASSWORD
+    # - ANDROID_KEY_ALIAS
+    # - ANDROID_KEY_ALIAS_PASSWORD
+    if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    name: Build Signed AAB (Release)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure buildozer.spec exists
+        run: |
+          if [ ! -f buildozer.spec ]; then
+            echo "ERROR: buildozer.spec not found. Create it locally (buildozer init) and commit it."
+            exit 1
+          fi
+
+      - name: Restore caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .buildozer
+            .gradle
+            .android
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt', 'pyproject.toml', 'Pipfile', 'Pipfile.lock', 'poetry.lock', 'setup.cfg', 'setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+
+      - name: Prepare signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > my-release-key.jks
+
+      - name: Configure buildozer.spec for release + AAB
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+        run: |
+          # Ensure these fields exist; if commented, uncomment and set values.
+          sed -i 's/^# *android\.release_keystore_file.*/android.release_keystore_file = my-release-key.jks/' buildozer.spec || true
+          sed -i "s/^# *android\.release_keystore_password.*/android.release_keystore_password = ${ANDROID_KEYSTORE_PASSWORD}/" buildozer.spec || true
+          sed -i "s/^# *android\.release_key_alias.*/android.release_key_alias = ${ANDROID_KEY_ALIAS}/" buildozer.spec || true
+          sed -i "s/^# *android\.release_key_password.*/android.release_key_password = ${ANDROID_KEY_ALIAS_PASSWORD}/" buildozer.spec || true
+          # Build AAB instead of APK for Play Store:
+          if grep -q '^android.build_aab' buildozer.spec; then
+            sed -i 's/^android\.build_aab.*/android.build_aab = True/' buildozer.spec
+          else
+            echo 'android.build_aab = True' >> buildozer.spec
+          fi
+
+      - name: Build signed AAB (Docker)
+        run: |
+          mkdir -p .buildozer .gradle .android
+          docker pull kivy/buildozer:latest
+          docker run --rm \
+            -e BUILDOZER_WARN_ON_ROOT=0 \
+            -v "$PWD":/home/user/app \
+            -v "$PWD/.buildozer":/home/user/.buildozer \
+            -v "$PWD/.gradle":/home/user/.gradle \
+            -v "$PWD/.android":/home/user/.android \
+            -w /home/user/app \
+            kivy/buildozer:latest \
+            bash -lc "ls -la && buildozer -v android release"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab
+          path: bin/*.aab
+          if-no-files-found: error
