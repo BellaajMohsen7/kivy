@@ -58,21 +58,25 @@ jobs:
     name: Build Signed AAB (Release)
     runs-on: ubuntu-latest
 
-    # Map secrets to env, then reference env in job-level if
+    # Expose secrets to steps as env
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
 
-    # Only run this job when a keystore is provided
-    if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-
     steps:
+      - name: No keystore provided — skipping AAB build
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 == '' }}
+        run: |
+          echo "ANDROID_KEYSTORE_BASE64 is not set. Skipping release AAB build."
+
       - name: Checkout
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/checkout@v4
 
       - name: Ensure buildozer.spec exists
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           if [ ! -f buildozer.spec ]; then
             echo "ERROR: buildozer.spec not found. Create it locally (buildozer init) and commit it."
@@ -80,6 +84,7 @@ jobs:
           fi
 
       - name: Restore caches
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/cache@v4
         with:
           path: |
@@ -91,10 +96,12 @@ jobs:
             ${{ runner.os }}-buildozer-
 
       - name: Prepare signing keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > my-release-key.jks
 
       - name: Configure buildozer.spec for release + AAB
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           sed -i 's/^# *android\.release_keystore_file.*/android.release_keystore_file = my-release-key.jks/' buildozer.spec || true
           sed -i "s/^# *android\.release_keystore_password.*/android.release_keystore_password = ${ANDROID_KEYSTORE_PASSWORD}/" buildozer.spec || true
@@ -108,6 +115,7 @@ jobs:
           fi
 
       - name: Build signed AAB (Docker)
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           mkdir -p .buildozer .gradle .android
           docker pull kivy/buildozer:latest
@@ -122,6 +130,7 @@ jobs:
             bash -lc "buildozer -v android release"
 
       - name: Upload AAB artifact
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-aab
