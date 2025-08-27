@@ -55,15 +55,18 @@ jobs:
           if-no-files-found: error
 
   build-android-aab:
-    # This job is optional and runs only if a keystore secret is present.
-    # Add the following repository secrets to enable:
-    # - ANDROID_KEYSTORE_BASE64 (your .jks file base64-encoded)
-    # - ANDROID_KEYSTORE_PASSWORD
-    # - ANDROID_KEY_ALIAS
-    # - ANDROID_KEY_ALIAS_PASSWORD
-    if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     name: Build Signed AAB (Release)
     runs-on: ubuntu-latest
+
+    # Map secrets to env, then reference env in job-level if
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+
+    # Only run this job when a keystore is provided
+    if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
 
     steps:
       - name: Checkout
@@ -88,23 +91,16 @@ jobs:
             ${{ runner.os }}-buildozer-
 
       - name: Prepare signing keystore
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > my-release-key.jks
 
       - name: Configure buildozer.spec for release + AAB
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         run: |
-          # Ensure these fields exist; if commented, uncomment and set values.
           sed -i 's/^# *android\.release_keystore_file.*/android.release_keystore_file = my-release-key.jks/' buildozer.spec || true
           sed -i "s/^# *android\.release_keystore_password.*/android.release_keystore_password = ${ANDROID_KEYSTORE_PASSWORD}/" buildozer.spec || true
           sed -i "s/^# *android\.release_key_alias.*/android.release_key_alias = ${ANDROID_KEY_ALIAS}/" buildozer.spec || true
           sed -i "s/^# *android\.release_key_password.*/android.release_key_password = ${ANDROID_KEY_ALIAS_PASSWORD}/" buildozer.spec || true
-          # Build AAB instead of APK for Play Store:
+
           if grep -q '^android.build_aab' buildozer.spec; then
             sed -i 's/^android\.build_aab.*/android.build_aab = True/' buildozer.spec
           else
@@ -123,7 +119,7 @@ jobs:
             -v "$PWD/.android":/home/user/.android \
             -w /home/user/app \
             kivy/buildozer:latest \
-            bash -lc "ls -la && buildozer -v android release"
+            bash -lc "buildozer -v android release"
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
